@@ -3,6 +3,7 @@ packages <- c("tidyverse", "shiny", "ggplot2", "lubridate", "shinydashboard",
               "tidyr", "leaflet", "plotly", "sf", "readr", "shinyWidgets")
 new_packages <- packages[!(packages %in% installed.packages()[,"Package"])]
 if(length(new_packages)) install.packages(new_packages)
+
 # Load the necessary libraries
 library(shiny)
 library(leaflet)
@@ -197,13 +198,13 @@ for(i in 1:nrow(cleaned_merged_data)) {
     message("Error geocoding address: ", cleaned_merged_data$address[i], "; Error: ", e$message)
     return(data.frame(lat = NA, lon = NA, stringsAsFactors = FALSE))
   })
-  
+
   # Update the cleaned_merged_data with geocode results
   if (!is.null(result) && nrow(result) > 0) {
     cleaned_merged_data$lat[i] <- result$lat
     cleaned_merged_data$lon[i] <- result$lon
   }
-  
+
   # Optionally, include a pause to avoid hitting API rate limits
   if(i %% 10 == 0) Sys.sleep(1)
 }
@@ -217,7 +218,70 @@ final_data_cleaned <- final_data %>%
   select (-`State Code`, -`Disaster Number`, -`address`) %>%
   mutate(`Disaster Name` = tolower(`Disaster Name`))
 
-# Export cleaned datasets
+# Caculate the total FEMA finacial support to both owners and renters
+final_data_cleaned <- final_data_cleaned %>%
+  mutate(Total_Support_Provided = `Repair/Replace Amount of Owner` +
+           `Rental Amount of Owner` +
+           `Other Needs Amount of Owner` +
+           `Repair/Replace Amount of Renter`+
+           `Rental Amount of Renter` +
+           `Other Needs Amount of Renter`
+         )
+
+# Caculate the total conceptual financial assistance by FEMA to owners and renters
+final_data_cleaned <- final_data_cleaned %>%
+  mutate(Total_IHP_Approved_Amount =
+           `Total Approved IHP Amount of Owner` +
+           `Total Approved IHP Amount of Renter`
+         )
+
+# Construct Support Efficiency by differencing actual and conceptual financial support by FEMA
+final_data_cleaned <- final_data_cleaned %>%
+  mutate(Support_Efficiency =
+           Total_IHP_Approved_Amount -
+           Total_Support_Provided
+         )
+
+# Convert the support efficiency column to integer value
+final_data_cleaned$Support_Efficiency <- as.integer(final_data_cleaned$Support_Efficiency)
+
+# Remove all irrelevant columns
+columns_to_delete <- c("totalMaxGrants of Renter",
+                       "Approved between $25001 and Max of Renter",
+                       "Approved between $10001 and $25000 of Renter",
+                       "Approved between $1 and $10000 of Renter",
+                       "Approved for FEMA Assistance of Renter",
+                       "Total with Substantial Damage",
+                       "Total with Major Damage",
+                       "Total with Moderate Damage",
+                       "Inspected with No Damage",
+                       "Total Inspected of Renter",
+                       "Valid Registrations of Renter",
+                       "totalMaxGrants of Owner",
+                       "Approved between $25001 and Max of Owner",
+                       "Approved between $10001 and $25000 of Owner",
+                       "Approved between $1 and $10000 of Owner",
+                       "Approved for FEMA Assistance of Owner",
+                       "FEMA Inspected Damage > $30000",
+                       "FEMA Inspected Damage between $20001 and $30000",
+                       "FEMA Inspected Damage between $10001 and $20000",
+                       "FEMA Inspected Damage between $1 and $10000",
+                       "No FEMA Inspected Damage",
+                       "Total Inspected of Owner",
+                       "Average FEMA Inspected Damage",
+                       "Valid Registrations of Owner",
+                       "Disaster Name")
+
+# Remove the specified columns
+final_data_cleaned <- select(final_data_cleaned, -one_of(columns_to_delete))
+
+# Create another dataset that contains all surplus financial support from FEMA
+new_final = final_data_cleaned[final_data_cleaned$Support_Efficiency != 0, ]
+
+# Load final cleaned data
+final_data_cleaned <- read_csv("fianl_data_cleaned.csv")
+
+# Export cleaned dataset
 # Export disaster_renamed to a CSV file
 write.csv(cleaned_disaster_data, "disaster_meta_data.csv", row.names = FALSE)
 
@@ -232,3 +296,6 @@ write.csv(cleaned_merged_data, "merged_data.csv", row.names = FALSE)
 
 # Export the final cleaned dataset for all datasets
 write.csv(final_data_cleaned, "fianl_data_cleaned.csv", row.names = FALSE)
+
+# Export the new final cleaned dataset for r-shiny
+write.csv(new_final, "Support_Efficiency_Shiny.csv", row.names = FALSE)
